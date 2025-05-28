@@ -6,7 +6,7 @@ import (
 	"log"
 	"net/http"
 	"time"
-
+	"github.com/labstack/echo/v4"
 	"github.com/coder/websocket"
 )
 
@@ -26,6 +26,7 @@ var (
 	clients 	map[*Client]bool 	= make(map[*Client]bool)
 	joinCh  	chan *Client      	= make(chan *Client)
 	broadcastCh chan Message 		= make(chan Message)
+	notifyCh	chan Message		= make(chan Message)
 )
 
 func wsHandler(w http.ResponseWriter, r *http.Request) {
@@ -60,6 +61,8 @@ func reader(newClient *Client) {
 		json.Unmarshal(data, &msgRec)
 
 		broadcastCh <- Message{From: msgRec.From, Content: msgRec.Content, SentAt: time.Now().Format("02-01-2006 15:04:05")}
+
+		notifyCh <- Message{From: "System", Content: "Nova mensagem recebida de " + newClient.Nickname, SentAt: time.Now().Format("02-01-2006 15:04:05")}
 	}
 }
 
@@ -72,28 +75,43 @@ func joiner() {
 }
 
 func broadcast() {
-	for newMsg := range broadcastCh {
-		for client := range clients {
-			msg, _ := json.Marshal(newMsg)
-			client.conn.Write(client.ctx, websocket.MessageText, msg)
+	for {
+		select {
+		case newMsg := <- broadcastCh:
+			sendToAll(newMsg)
+
+		case notify := <- notifyCh:
+			sendToAll(notify)
 		}
+	}
+}
+
+func sendToAll(msg Message) {
+	for client := range clients {
+		data, _ := json.Marshal(msg)
+		client.conn.Write(client.ctx, websocket.MessageText, data)
 	}
 }
 
 func main() {
 
-	http.Handle("/", http.FileServer(http.Dir("./public")))
+	e := echo.New()
 
-	http.HandleFunc("/ws", wsHandler) 
-	http.HandleFunc("/clients", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Add("Content-Type", "application/json")
+	e.Static("/", "./public")
+
+	e.GET("/clients", func(ctx echo.Context) error {
 		var listaClient []*Client
-
-		for c := range clients {
-			listaClient = append(listaClient, c)
+		for client := range clients {
+			listaClient = append(listaClient, client)
 		}
-		json.NewEncoder(w).Encode(listaClient)
+		return ctx.JSON(http.StatusOK, listaClient)
 	})
+
+	e.GET("/ws", func(ctx echo.Context) error {
+		wsHandler(ctx.Response(), ctx.Request())
+		return nil
+	})
+
 	log.Println("Server initialized on port 8080....")
-	http.ListenAndServe(":8080", nil)
+	e.Logger.Fatal(e.Start(":8080"))
 }
