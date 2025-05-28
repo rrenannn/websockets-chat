@@ -61,8 +61,6 @@ func reader(newClient *Client) {
 		json.Unmarshal(data, &msgRec)
 
 		broadcastCh <- Message{From: msgRec.From, Content: msgRec.Content, SentAt: time.Now().Format("02-01-2006 15:04:05")}
-
-		notifyCh <- Message{From: "System", Content: "Nova mensagem recebida de " + newClient.Nickname, SentAt: time.Now().Format("02-01-2006 15:04:05")}
 	}
 }
 
@@ -76,13 +74,8 @@ func joiner() {
 
 func broadcast() {
 	for {
-		select {
-		case newMsg := <- broadcastCh:
-			sendToAll(newMsg)
-
-		case notify := <- notifyCh:
-			sendToAll(notify)
-		}
+		newMsg := <- broadcastCh
+		sendToAll(newMsg)
 	}
 }
 
